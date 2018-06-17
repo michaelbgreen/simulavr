@@ -215,6 +215,7 @@ class InvalidMem : public RWMemoryMember {
 class NotSimulatedRegister : public RWMemoryMember {
     private:
         const char * message_on_access;
+        bool warned;
 
     public:
         NotSimulatedRegister(const char * message_on_access);
