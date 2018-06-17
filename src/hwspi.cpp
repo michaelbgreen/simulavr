@@ -133,7 +133,6 @@ void HWSpi::SetSPCR(unsigned char val) {
             SCK.SetAlternatePort(spcr & CPOL);
             SCK.SetUseAlternatePortIfDdrSet(1);
             assert(SCK.GetPin().outState == ((spcr & CPOL) ? Pin::HIGH : Pin::LOW));
-            assert(SCK.GetPin().outState == ((spcr & CPOL) ? Pin::HIGH : Pin::LOW));
         } else { //slave
             MISO.SetUseAlternatePortIfDdrSet(1);
             MOSI.SetUseAlternateDdr(1);
