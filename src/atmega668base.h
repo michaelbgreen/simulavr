@@ -47,10 +47,12 @@ class AvrDevice_atmega668base: public AvrDevice {
         HWPort              portb;       //!< port B
         HWPort              portc;       //!< port C
         HWPort              portd;       //!< port D
+        HWPort*             porte;       //!< port E
+        HWPort*             portf;       //!< port F
         IOSpecialReg        gtccr_reg;   //!< GTCCR IO register
         IOSpecialReg        assr_reg;    //!< ASSR IO register
-        HWPrescaler         prescaler01; //!< prescaler unit for timer 0 and 1
-        HWPrescalerAsync    prescaler2;  //!< prescaler unit for timer 2
+        HWPrescaler         prescaler013; //!< prescaler unit for timers 0, 1, and 3
+        HWPrescalerAsync*   prescaler2;  //!< prescaler unit for timer 2
         ExternalIRQHandler* extirq01;    //!< external interrupt support for INT0, INT1
         IOSpecialReg*       eicra_reg;   //!< EICRA IO register
         IOSpecialReg*       eimsk_reg;   //!< EIMSK IO register
@@ -74,6 +76,9 @@ class AvrDevice_atmega668base: public AvrDevice {
         HWTimer16_2C3*      timer1;      //!< timer 1 unit
         TimerIRQRegister*   timerIrq2;   //!< timer interrupt unit for timer 2
         HWTimer8_2C*        timer2;      //!< timer 2 unit
+        ICaptureSource*     inputCapture3; //!< input capture source for timer3
+        TimerIRQRegister*   timerIrq3;   //!< timer interrupt unit for timer 3
+        HWTimer16_1C*       timer3;      //!< timer 3 unit
         GPIORegister*       gpior0_reg;  //!< general purpose IO register
         GPIORegister*       gpior1_reg;  //!< general purpose IO register
         GPIORegister*       gpior2_reg;  //!< general purpose IO register
@@ -87,7 +92,7 @@ class AvrDevice_atmega668base: public AvrDevice {
           @param flash_bytes how much flash memory does the device own
           @param ee_bytes how much EEPROM space does the device own */
         AvrDevice_atmega668base(unsigned ram_bytes, unsigned flash_bytes,
-                                unsigned ee_bytes );
+                                unsigned ee_bytes, bool atmega32u4 = false );
         
         ~AvrDevice_atmega668base();
         
@@ -98,6 +103,13 @@ class AvrDevice_atmega328: public AvrDevice_atmega668base {
     public:
         //! Creates the device for ATMega328, see AvrDevice_atmega668base.
         AvrDevice_atmega328() : AvrDevice_atmega668base(2 * 1024, 32 * 1024, 1024) {}
+};
+
+//! AVR device class for ATMega32u4, see AvrDevice_atmega668base.
+class AvrDevice_atmega32u4: public AvrDevice_atmega668base {
+    public:
+        //! Creates the device for ATMega32u4, see AvrDevice_atmega668base.
+        AvrDevice_atmega32u4() : AvrDevice_atmega668base(0xb00, 32 * 1024, 1024, true) {}
 };
 
 //! AVR device class for ATMega168, see AvrDevice_atmega668base.

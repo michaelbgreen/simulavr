@@ -34,6 +34,7 @@ AVR_REGISTER(atmega48, AvrDevice_atmega48)
 AVR_REGISTER(atmega88, AvrDevice_atmega88)
 AVR_REGISTER(atmega168, AvrDevice_atmega168)
 AVR_REGISTER(atmega328, AvrDevice_atmega328)
+AVR_REGISTER(atmega32u4, AvrDevice_atmega32u4)
 
 AvrDevice_atmega668base::~AvrDevice_atmega668base() {
     delete usart0;
@@ -72,7 +73,8 @@ AvrDevice_atmega668base::~AvrDevice_atmega668base() {
 
 AvrDevice_atmega668base::AvrDevice_atmega668base(unsigned ram_bytes,
                                                  unsigned flash_bytes,
-                                                 unsigned ee_bytes ):
+                                                 unsigned ee_bytes,
+                                                 bool atmega32u4):
     AvrDevice(224,          // I/O space above General Purpose Registers
               ram_bytes,    // RAM size
               0,            // External RAM size
@@ -84,9 +86,13 @@ AvrDevice_atmega668base::AvrDevice_atmega668base(unsigned ram_bytes,
     portd(this, "D", true),
     gtccr_reg(&coreTraceGroup, "GTCCR"),
     assr_reg(&coreTraceGroup, "ASSR"),
-    prescaler01(this, "01", &gtccr_reg, 0, 7),
-    prescaler2(this, "2", PinAtPort(&portb, 6), &assr_reg, 5, &gtccr_reg, 1, 7)
+    prescaler013(this, "01", &gtccr_reg, 0, 7)
 { 
+    if (atmega32u4) {
+        porte = new HWPort(this, "E", true);
+        portf = new HWPort(this, "F", true);
+    }
+
     flagJMPInstructions = (flash_bytes > 8U * 1024U) ? true : false;
     if(flash_bytes > 4U * 1024U) {
         if(flash_bytes > 16U * 1024U)
@@ -98,9 +104,9 @@ AvrDevice_atmega668base::AvrDevice_atmega668base(unsigned ram_bytes,
     } else
         // atmega48
         fuses->SetFuseConfiguration(17, 0xffdf62);
-    irqSystem = new HWIrqSystem(this, (flash_bytes > 8U * 1024U) ? 4 : 2, 26);
+    irqSystem = new HWIrqSystem(this, (flash_bytes > 8U * 1024U) ? 4 : 2, atmega32u4 ? 42 : 26);
     
-    eeprom = new HWEeprom(this, irqSystem, ee_bytes, 22, HWEeprom::DEVMODE_EXTENDED);
+    eeprom = new HWEeprom(this, irqSystem, ee_bytes, atmega32u4 ? 30 : 22, HWEeprom::DEVMODE_EXTENDED);
     stack = new HWStackSram(this, 16);
     clkpr_reg = new CLKPRRegister(this, &coreTraceGroup);
     osccal_reg = new OSCCALRegister(this, &coreTraceGroup, OSCCALRegister::OSCCAL_V5);
@@ -118,58 +124,83 @@ AvrDevice_atmega668base::AvrDevice_atmega668base(unsigned ram_bytes,
     pcicr_reg = new IOSpecialReg(&coreTraceGroup, "PCICR");
     pcifr_reg = new IOSpecialReg(&coreTraceGroup, "PCIFR");
     pcmsk0_reg = new IOSpecialReg(&coreTraceGroup, "PCMSK0");
-    pcmsk1_reg = new IOSpecialReg(&coreTraceGroup, "PCMSK1");
-    pcmsk2_reg = new IOSpecialReg(&coreTraceGroup, "PCMSK2");
+    if (!atmega32u4) {
+        pcmsk1_reg = new IOSpecialReg(&coreTraceGroup, "PCMSK1");
+        pcmsk2_reg = new IOSpecialReg(&coreTraceGroup, "PCMSK2");
+    }
     extirqpc = new ExternalIRQHandler(this, irqSystem, pcicr_reg, pcifr_reg);
-    extirqpc->registerIrq(3, 0, new ExternalIRQPort(pcmsk0_reg, &portb));
-    extirqpc->registerIrq(4, 1, new ExternalIRQPort(pcmsk1_reg, &portc));
-    extirqpc->registerIrq(5, 2, new ExternalIRQPort(pcmsk2_reg, &portd));
+    extirqpc->registerIrq(atmega32u4 ? 9 : 3, 0, new ExternalIRQPort(pcmsk0_reg, &portb));
+    if (!atmega32u4) {
+        extirqpc->registerIrq(4, 1, new ExternalIRQPort(pcmsk1_reg, &portc));
+        extirqpc->registerIrq(5, 2, new ExternalIRQPort(pcmsk2_reg, &portd));
+    }
     
     timerIrq0 = new TimerIRQRegister(this, irqSystem, 0);
-    timerIrq0->registerLine(0, new IRQLine("TOV0",  16));
-    timerIrq0->registerLine(1, new IRQLine("OCF0A", 14));
-    timerIrq0->registerLine(2, new IRQLine("OCF0B", 15));
+    timerIrq0->registerLine(0, new IRQLine("TOV0",  atmega32u4 ? 23 : 16));
+    timerIrq0->registerLine(1, new IRQLine("OCF0A", atmega32u4 ? 21 : 14));
+    timerIrq0->registerLine(2, new IRQLine("OCF0B", atmega32u4 ? 22 : 15));
     
     timer0 = new HWTimer8_2C(this,
-                             new PrescalerMultiplexerExt(&prescaler01, PinAtPort(&portd, 4)),
+                             new PrescalerMultiplexerExt(&prescaler013, PinAtPort(&portd, 4)),
                              0,
                              timerIrq0->getLine("TOV0"),
                              timerIrq0->getLine("OCF0A"),
-                             new PinAtPort(&portd, 6),
+                             atmega32u4 ? new PinAtPort(&portb, 7) : new PinAtPort(&portd, 6),
                              timerIrq0->getLine("OCF0B"),
-                             new PinAtPort(&portd, 5));
+                             new PinAtPort(&portd, atmega32u4 ? 0 : 5));
 
     timerIrq1 = new TimerIRQRegister(this, irqSystem, 1);
-    timerIrq1->registerLine(0, new IRQLine("TOV1",  13));
-    timerIrq1->registerLine(1, new IRQLine("OCF1A", 11));
-    timerIrq1->registerLine(2, new IRQLine("OCF1B", 12));
-    timerIrq1->registerLine(5, new IRQLine("ICF1",  10));
+    timerIrq1->registerLine(0, new IRQLine("TOV1",  atmega32u4 ? 20 : 13));
+    timerIrq1->registerLine(1, new IRQLine("OCF1A", atmega32u4 ? 17 : 11));
+    timerIrq1->registerLine(2, new IRQLine("OCF1B", atmega32u4 ? 18 : 12));
+    timerIrq1->registerLine(5, new IRQLine("ICF1",  atmega32u4 ? 16 : 10));
     
-    inputCapture1 = new ICaptureSource(PinAtPort(&portb, 0));
+    inputCapture1 = new ICaptureSource(atmega32u4 ? PinAtPort(&portd, 4) : PinAtPort(&portb, 0));
     timer1 = new HWTimer16_2C3(this,
-                               new PrescalerMultiplexerExt(&prescaler01, PinAtPort(&portd, 5)),
+                               new PrescalerMultiplexerExt(&prescaler013, PinAtPort(&portd, 5)),
                                1,
                                timerIrq1->getLine("TOV1"),
                                timerIrq1->getLine("OCF1A"),
-                               new PinAtPort(&portb, 1),
+                               new PinAtPort(&portb, atmega32u4 ? 5 : 1),
                                timerIrq1->getLine("OCF1B"),
-                               new PinAtPort(&portb, 2),
+                               new PinAtPort(&portb, atmega32u4 ? 6 : 2),
                                timerIrq1->getLine("ICF1"),
                                inputCapture1);
     
-    timerIrq2 = new TimerIRQRegister(this, irqSystem, 2);
-    timerIrq2->registerLine(0, new IRQLine("TOV2",  9));
-    timerIrq2->registerLine(1, new IRQLine("OCF2A", 7));
-    timerIrq2->registerLine(2, new IRQLine("OCF2B", 8));
-    
-    timer2 = new HWTimer8_2C(this,
-                             new PrescalerMultiplexer(&prescaler2),
-                             2,
-                             timerIrq2->getLine("TOV2"),
-                             timerIrq2->getLine("OCF2A"),
-                             new PinAtPort(&portb, 3),
-                             timerIrq2->getLine("OCF2B"),
-                             new PinAtPort(&portd, 3));
+    if (atmega32u4) {
+        timerIrq3 = new TimerIRQRegister(this, irqSystem, -2);
+        timerIrq3->registerLine(1, new IRQLine("OCF3C", 34));
+        timerIrq3->registerLine(2, new IRQLine("TOV3",  35));
+        timerIrq3->registerLine(3, new IRQLine("OCF3B", 33));
+        timerIrq3->registerLine(4, new IRQLine("OCF3A", 32));
+        timerIrq3->registerLine(5, new IRQLine("ICF3",  31));
+
+        inputCapture3 = new ICaptureSource(PinAtPort(&portc, 7));
+        timer3 = new HWTimer16_1C(this,
+                                new PrescalerMultiplexer(&prescaler013),
+                                3,
+                                timerIrq3->getLine("TOV3"),
+                                timerIrq3->getLine("OCF3A"),
+                                new PinAtPort(&portc, 6),
+                                timerIrq3->getLine("ICF3"),
+                                inputCapture3);
+    } else {
+        prescaler2 = new HWPrescalerAsync(this, "2", PinAtPort(&portb, 6), &assr_reg, 5, &gtccr_reg, 1, 7);
+
+        timerIrq2 = new TimerIRQRegister(this, irqSystem, 2);
+        timerIrq2->registerLine(0, new IRQLine("TOV2",  9));
+        timerIrq2->registerLine(1, new IRQLine("OCF2A", 7));
+        timerIrq2->registerLine(2, new IRQLine("OCF2B", 8));
+        
+        timer2 = new HWTimer8_2C(this,
+                                new PrescalerMultiplexer(prescaler2),
+                                2,
+                                timerIrq2->getLine("TOV2"),
+                                timerIrq2->getLine("OCF2A"),
+                                new PinAtPort(&portb, 3),
+                                timerIrq2->getLine("OCF2B"),
+                                new PinAtPort(&portd, 3));
+    }
 
     gpior0_reg = new GPIORegister(this, &coreTraceGroup, "GPIOR0");
     gpior1_reg = new GPIORegister(this, &coreTraceGroup, "GPIOR1");
@@ -186,17 +217,17 @@ AvrDevice_atmega668base::AvrDevice_atmega668base(unsigned ram_bytes,
 
     aref = new HWARef4(this, HWARef4::REFTYPE_BG4);
 
-    ad = new HWAd(this, HWAd::AD_M48, irqSystem, 21, admux, aref); // Interrupt Vector ADC Conversion Complete
+    ad = new HWAd(this, HWAd::AD_M48, irqSystem, atmega32u4 ? 29 : 21, admux, aref); // Interrupt Vector ADC Conversion Complete
 
-    acomp = new HWAcomp(this, irqSystem, PinAtPort(&portd, 6), PinAtPort(&portd, 7), 23, ad, timer1);
+    acomp = new HWAcomp(this, irqSystem, PinAtPort(&portd, 6), PinAtPort(&portd, 7), atmega32u4 ? 28 : 23, ad, timer1);
 
     spi = new HWSpi(this,
                     irqSystem,
-                    PinAtPort(&portb, 3),   // MOSI
-                    PinAtPort(&portb, 4),   // MISO
-                    PinAtPort(&portb, 5),   // SCK
-                    PinAtPort(&portb, 2),   // /SS
-                    17,                     // irqvec
+                    PinAtPort(&portb, atmega32u4 ? 2 : 3),   // MOSI
+                    PinAtPort(&portb, atmega32u4 ? 3 : 4),   // MISO
+                    PinAtPort(&portb, atmega32u4 ? 1 : 5),   // SCK
+                    PinAtPort(&portb, atmega32u4 ? 0 : 2),   // /SS
+                    atmega32u4 ? 24 : 17,                     // irqvec
                     true);
     
     wado = new HWWado(this);
@@ -206,21 +237,37 @@ AvrDevice_atmega668base::AvrDevice_atmega668base(unsigned ram_bytes,
                          PinAtPort(&portd,1),    // TXD
                          PinAtPort(&portd,0),    // RXD
                          PinAtPort(&portd, 4),   // XCK
-                         18,   // (18) RX complete vector
-                         19,   // (19) UDRE vector
-                         20);  // (20) TX complete vector
+                         atmega32u4 ? 25 : 18,   // (18) RX complete vector
+                         atmega32u4 ? 26 : 19,   // (19) UDRE vector
+                         atmega32u4 ? 27 : 20);  // (20) TX complete vector
 
     rw[0xE6]= new NotSimulatedRegister("UDR0 register is placed 0xC6!");
     rw[0xE4]= new NotSimulatedRegister("UBRR0L register is placed 0xC4!");
     rw[0xE1]= new NotSimulatedRegister("UCSR0B register is placed 0xC1!");
     rw[0xE1]= new NotSimulatedRegister("UCSR0A register is placed 0xC0!");
-    rw[0xC6]= & usart0->udr_reg;
-    rw[0xC5]= & usart0->ubrrhi_reg;
-    rw[0xC4]= & usart0->ubrr_reg;
-    // 0xC3 reserved
-    rw[0xC2]= & usart0->ucsrc_reg;
-    rw[0xC1]= & usart0->ucsrb_reg;
-    rw[0xC0]= & usart0->ucsra_reg;
+    if (atmega32u4) {
+        rw[0xCE]= & usart0->udr_reg;
+        rw[0xCD]= & usart0->ubrrhi_reg;
+        rw[0xCC]= & usart0->ubrr_reg;
+        // 0xCB reserved
+        rw[0xCA]= & usart0->ucsrc_reg;
+        rw[0xC9]= & usart0->ucsrb_reg;
+        rw[0xC8]= & usart0->ucsra_reg;
+        rw[0xC4]= new NotSimulatedRegister("timer/counter4 not simulated");
+        rw[0xC3]= new NotSimulatedRegister("timer/counter4 not simulated");
+        rw[0xC2]= new NotSimulatedRegister("timer/counter4 not simulated");
+        rw[0xC1]= new NotSimulatedRegister("timer/counter4 not simulated");
+        rw[0xC0]= new NotSimulatedRegister("timer/counter4 not simulated");
+    }
+    if (!atmega32u4) {
+        rw[0xC6]= & usart0->udr_reg;
+        rw[0xC5]= & usart0->ubrrhi_reg;
+        rw[0xC4]= & usart0->ubrr_reg;
+        // 0xC3 reserved
+        rw[0xC2]= & usart0->ucsrc_reg;
+        rw[0xC1]= & usart0->ucsrb_reg;
+        rw[0xC0]= & usart0->ucsra_reg;
+    }
     // 0xBF reserved
     rw[0xBD]= new NotSimulatedRegister("TWI register TWAMR not simulated");
     rw[0xBC]= new NotSimulatedRegister("TWI register TWCR not simulated");
@@ -231,12 +278,32 @@ AvrDevice_atmega668base::AvrDevice_atmega668base(unsigned ram_bytes,
     // 0xB7 reserved
     rw[0xb6]= & assr_reg;
     // 0xb5 reserved
-    rw[0xb4]= & timer2->ocrb_reg;
-    rw[0xb3]= & timer2->ocra_reg;
-    rw[0xb2]= & timer2->tcnt_reg;
-    rw[0xb1]= & timer2->tccrb_reg;
-    rw[0xb0]= & timer2->tccra_reg;
+    if (!atmega32u4) {
+        rw[0xb4]= & timer2->ocrb_reg;
+        rw[0xb3]= & timer2->ocra_reg;
+        rw[0xb2]= & timer2->tcnt_reg;
+        rw[0xb1]= & timer2->tccrb_reg;
+        rw[0xb0]= & timer2->tccra_reg;
+    }
     // 0x8c - 0xaf reserved
+
+    if (atmega32u4) {
+        rw[0x9d]= & timer3->ocrc_h_reg;
+        rw[0x9c]= & timer3->ocrc_l_reg;
+        rw[0x9b]= & timer3->ocrb_h_reg;
+        rw[0x9a]= & timer3->ocrb_l_reg;
+        rw[0x99]= & timer3->ocra_h_reg;
+        rw[0x98]= & timer3->ocra_l_reg;
+        rw[0x97]= & timer3->icr_h_reg;
+        rw[0x96]= & timer3->icr_l_reg;
+        rw[0x95]= & timer3->tcnt_h_reg;
+        rw[0x94]= & timer3->tcnt_l_reg;
+        // 0x93 reserved
+        //rw[0x92]= & timer3->tccrc_reg;
+        rw[0x91]= & timer3->tccrb_reg;
+        rw[0x90]= & timer3->tccra_reg;
+    }
+
     rw[0x8b]= & timer1->ocrb_h_reg;
     rw[0x8a]= & timer1->ocrb_l_reg;
     rw[0x89]= & timer1->ocra_h_reg;
@@ -258,12 +325,16 @@ AvrDevice_atmega668base::AvrDevice_atmega668base(unsigned ram_bytes,
     rw[0x79]= & ad->adch_reg;
     rw[0x78]= & ad->adcl_reg;
     // 0x71 - 0x77 reserved
-    rw[0x70]= & timerIrq2->timsk_reg;
+    if (!atmega32u4) {
+        rw[0x70]= & timerIrq2->timsk_reg;
+    }
     rw[0x6F]= & timerIrq1->timsk_reg;
     rw[0x6E]= & timerIrq0->timsk_reg;
 
-    rw[0x6d]= pcmsk2_reg;
-    rw[0x6c]= pcmsk1_reg;
+    if (!atmega32u4) {
+        rw[0x6d]= pcmsk2_reg;
+        rw[0x6c]= pcmsk1_reg;
+    }
     rw[0x6b]= pcmsk0_reg;
     // 0x6A reserved
     rw[0x69]= eicra_reg;
@@ -310,10 +381,22 @@ AvrDevice_atmega668base::AvrDevice_atmega668base(unsigned ram_bytes,
     rw[0x3C]= eifr_reg;
     rw[0x3b]= pcifr_reg;
     // 0x38, 0x39, 0x3A reserved
-    rw[0x37]= & timerIrq2->tifr_reg;
+    if (!atmega32u4) {
+        rw[0x37]= & timerIrq2->tifr_reg;
+    }
     rw[0x36]= & timerIrq1->tifr_reg;
     rw[0x35]= & timerIrq0->tifr_reg;
-    // 0x2C - 0x34 reserved
+    // 0x32 - 0x34 reserved
+
+    if (atmega32u4) {
+        rw[0x31]= & portf->port_reg;
+        rw[0x30]= & portf->ddr_reg;
+        rw[0x2F]= & portf->pin_reg;
+        rw[0x2E]= & porte->port_reg;
+        rw[0x2D]= & porte->ddr_reg;
+        rw[0x2C]= & porte->pin_reg;
+    }
+
     rw[0x2B]= & portd.port_reg;
     rw[0x2A]= & portd.ddr_reg;
     rw[0x29]= & portd.pin_reg;
