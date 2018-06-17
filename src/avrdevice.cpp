@@ -449,6 +449,8 @@ unsigned char AvrDevice::GetRWMem(unsigned addr) {
 }
 
 bool AvrDevice::SetRWMem(unsigned addr, unsigned char val) {
+    if (addr < registerSpaceSize)
+        avr_warning("Writing %u to register %u at PC=0x%x", (unsigned)val, addr, (unsigned)(PC * 2));
     if(addr >= GetMemTotalSize())
         return false;
     *(rw[addr]) = val;
